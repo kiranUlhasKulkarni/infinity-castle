@@ -21,6 +21,8 @@ import { Estate, ROOM_RESERVE, roomLayout } from './Estate.js';
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
+// Touch screens get on-screen controls (loaded on demand); desktop gets none.
+const TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 /* ───────────── renderer / scene ───────────── */
 
@@ -80,6 +82,20 @@ atmosphere.estate = 1;
 const crows = new Crows(scene, audio);
 const post = new Post(renderer, scene, camera);
 post.setSize(innerWidth, innerHeight, pixelRatio);
+
+/* ───────────── touch controls (touch screens only) ───────────── */
+
+let touch = null;
+const canBiwa = () => phase === 'explore' && !biwa.active && controller.grounded && controller.interaction === 'none';
+if (TOUCH) {
+  import('./input/TouchControls.js').then(({ TouchControls }) => {
+    touch = new TouchControls(controller, { onBiwa: () => canBiwa() && biwa.trigger('strum') });
+    touch.visible = phase === 'explore';
+  });
+  // touch hints instead of keyboard ones
+  document.getElementById('hint').innerHTML =
+    '<span><b>Left thumb</b> move · push to the rim to run</span><span><b>Right side</b> drag to look</span><span><b>Buttons</b> jump · Kanao · Biwa</span>';
+}
 
 const shiftAll = (dx, dy, dz) => {
   controller.shift(dx, dy, dz);
@@ -143,6 +159,7 @@ function drop() {
     onLanded: () => {
       phase = 'explore';
       controller.locked = false; // control returns
+      if (touch) touch.visible = true;
       biwa.armed = true; // the hidden timer starts now
       letterbox.classList.remove('letterbox--on');
       const hint = document.getElementById('hint');
@@ -167,7 +184,7 @@ Promise.all([
     castle.assemble(SPAWN, PAD, CASTLE.seed + 1, OPENING.fallSeconds - 0.7);
     bar.style.transform = 'scaleX(1)';
     gate.classList.add('gate--ready');
-    prompt.textContent = 'Click to enter';
+    prompt.textContent = TOUCH ? 'Tap to enter' : 'Click to enter';
   })
   .catch((err) => {
     console.error('[character] failed to load', err);
@@ -198,13 +215,27 @@ window.addEventListener('keydown', (e) => {
 /* ───────────── resize + adaptive resolution ───────────── */
 
 function resize() {
-  camera.aspect = innerWidth / innerHeight;
+  const w = innerWidth, h = innerHeight;
+  if (!w || !h) return; // hidden / collapsed (a 0×0 size would poison the FOV with NaN)
+  camera.aspect = w / h;
+  // Portrait phones: widen the vertical FOV so the horizontal view stays ≥ ~62°
+  // (a plain 62° vertical FOV would leave a ~30° keyhole at 9:19.5).
+  const minH = (62 * Math.PI) / 180;
+  const vForH = (2 * Math.atan(Math.tan(minH / 2) / camera.aspect) * 180) / Math.PI;
+  controller.fovBase = Math.min(88, Math.max(CAMERA.fov, vForH));
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(pixelRatio);
-  renderer.setSize(innerWidth, innerHeight);
-  post.setSize(innerWidth, innerHeight, pixelRatio);
+  renderer.setSize(w, h);
+  post.setSize(w, h, pixelRatio);
 }
 addEventListener('resize', resize);
+// rotation: some mobile browsers report the new size a beat after the event
+addEventListener('orientationchange', () => {
+  resize();
+  setTimeout(resize, 300);
+});
+window.visualViewport?.addEventListener('resize', resize);
+resize();
 
 let perfT = 0, perfFrames = 0, goodStreak = 0;
 function adapt(dt, rawDt) {
@@ -309,6 +340,7 @@ function step(dt, rawDt) {
   heroFill.position.set(p.x - tmp.x * 1.6, p.y + 2.3, p.z - tmp.z * 1.6);
   heroFill.color.setRGB(1, 0.62 - 0.4 * biwa.fx.flash, 0.38 - 0.25 * biwa.fx.flash);
 
+  if (touch) touch.biwaReady = canBiwa();
   crows.update(dt, p, camera, time);
   updateKissPoint();
   atmosphere.update(camera, biwa.fx.fall, pixelRatio, dt);

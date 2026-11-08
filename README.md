@@ -25,6 +25,24 @@ Click the title to enter. Browsers only allow audio after a click, which is why 
 | Esc | release the cursor |
 | Music bars, bottom right | mute or unmute the background music |
 
+### Touch screens (phones, tablets)
+
+Touch devices (`'ontouchstart' in window || navigator.maxTouchPoints > 0`) get on-screen controls; on desktop the module isn't even downloaded, so there's no extra markup, CSS or listeners. Touch-screen laptops count as touch devices too, and get both schemes.
+
+| Touch | Action |
+|---|---|
+| Left half | virtual joystick. It rests bottom-left and re-centres under your thumb; the knob follows it and everything glides home on release. Push to the rim to sprint; anything less is an analog walk. |
+| Right half | drag to look (same yaw/pitch as the mouse; works with a thumb on the stick at the same time) |
+| ↑ | jump |
+| ♥ | the 'K' moment with Kanao |
+| Biwa | spring the trap now (greyed out mid-fall or mid-moment) |
+
+* **How it plugs in.** The joystick vector goes into `controller.stick`, which replaces WASD while held. The look drag calls `controller.look()`, the same path as the mouse.
+* **No browser gestures.** Every touch handler is non-passive and calls `preventDefault()`, and pinch, double-tap zoom and scrolling are blocked.
+* **Placement.** The controls fade in once the opening's landing hands over control. The buttons sit above the music bars, which stay tappable.
+* **Rotation.** The canvas, camera aspect and post chain resize on `resize`, `orientationchange` and `visualViewport` resize.
+* **Portrait.** The vertical FOV widens, up to 88°, so the horizontal view stays at least about 62°. A phone held upright would otherwise see a narrow slit.
+
 URL flags: `?stats` shows an FPS meter. `?debug` lets **B** trigger the Biwa and exposes `window.__castle`, including `__castle.tick(n)` to step frames when the tab is throttled.
 
 ## How it flows
@@ -55,6 +73,7 @@ src/player/
   profiles.js                  Tanjiro and Kanao: bone maps, materials, cloth chains
   CompanionAI.js               Kanao's path-following
   kanao/                       painted-look code ported 1:1 from ../fireworks
+src/input/TouchControls.js     joystick, look zone and buttons; loaded only on touch screens
 src/fx/                        crows (boids), atmosphere (void, embers, speed streaks), post
 src/audio/                     synthesized SFX (biwa strum, steps, caws, wind), YouTube BGM
 tanjiro_arena_of_valor.glb     Tanjiro (also in ../fireworks as tanjiro.glb)

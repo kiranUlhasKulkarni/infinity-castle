@@ -16,7 +16,9 @@ export const INTERACT = { approachMax: 5, kiss: 3, release: 0.9, distance: 0.6 }
  * Third-person controller.
  *
  *  Input   WASD (camera-relative), Shift run, Space jump, mouse look (pointer lock,
- *          drag-to-look fallback), wheel zoom.
+ *          drag-to-look fallback), wheel zoom. Touch devices feed `stick` (an
+ *          analog vector that replaces WASD while held) and call `look()` — see
+ *          input/TouchControls.js, which only loads on touch screens.
  *  Floor   a THREE.Raycaster cast straight down from Tanjiro's origin (raised by the
  *          step height so stairs can be climbed) against the nearby-collider proxy.
  *          The ray length grows with fall speed, so fast falls never tunnel.
@@ -64,6 +66,9 @@ export class Controller {
     this.partner = null; // plain-data state of the companion ({ position, arrived }) — set by main
     this.onKiss = null;
     this.quat = new Quaternion();
+    // analog movement (virtual joystick): x = right, y = forward, magnitude 0..1
+    this.stick = { x: 0, y: 0, active: false };
+    this.fovBase = CAMERA.fov; // widened in portrait (main.js on resize)
     /**
      * Read-only snapshot for other systems (CompanionAI, FX). Plain data, same
      * object every frame, so readers never need to import this module.
@@ -96,10 +101,7 @@ export class Controller {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
-    const look = (dx, dy) => {
-      this.camYaw -= dx * CAMERA.sensitivity;
-      this.camPitch = clamp(this.camPitch + dy * CAMERA.sensitivity, CAMERA.minPitch, CAMERA.maxPitch);
-    };
+    const look = (dx, dy) => this.look(dx, dy);
     document.addEventListener('mousemove', (e) => {
       if (!this.enabled) return;
       if (document.pointerLockElement === dom) look(e.movementX, e.movementY);
@@ -114,14 +116,13 @@ export class Controller {
     dom.addEventListener('wheel', (e) => {
       this.zoom = clamp(this.zoom + e.deltaY * 0.004, 2.2, 9);
     }, { passive: true });
-    // touch: drag to look
-    let last = null;
-    dom.addEventListener('touchstart', (e) => (last = e.touches[0]), { passive: true });
-    dom.addEventListener('touchmove', (e) => {
-      const t = e.touches[0];
-      if (last && this.enabled) look((t.clientX - last.clientX) * 2.2, (t.clientY - last.clientY) * 2.2);
-      last = t;
-    }, { passive: true });
+  }
+
+  /** Camera look by a pointer delta (mouse pixels; touch scales its own). */
+  look(dx, dy) {
+    if (!this.enabled) return;
+    this.camYaw -= dx * CAMERA.sensitivity;
+    this.camPitch = clamp(this.camPitch + dy * CAMERA.sensitivity, CAMERA.minPitch, CAMERA.maxPitch);
   }
 
   spawn(p) {
@@ -140,9 +141,20 @@ export class Controller {
 
   update(dt) {
     const k = this.keys;
-    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-    const run = k.has('ShiftLeft') || k.has('ShiftRight');
+    let fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    let side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    let run = k.has('ShiftLeft') || k.has('ShiftRight');
+    let amount = 1; // analog throttle (joystick)
+    const stk = this.stick;
+    if (stk.active) {
+      // the joystick replaces WASD: direction from the vector, speed from how far it's pushed
+      const m = Math.min(1, Math.hypot(stk.x, stk.y));
+      fwd = stk.y;
+      side = stk.x;
+      run = m > 0.88; // pushed to the rim: sprint
+      amount = run ? 1 : 0.3 + 0.7 * clamp((m - 0.12) / 0.76, 0, 1);
+      if (m < 0.12) fwd = side = 0; // dead zone
+    }
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
     // right = forward × up
     let wx = fx * fwd + -fz * side;
@@ -152,7 +164,7 @@ export class Controller {
     const busy = this.interaction !== 'none'; // the 'K' moment: no walking
     const active = this.enabled && !this.locked && !this.scripted && !busy && wl > 0;
     if (wl > 0) { wx /= wl; wz /= wl; }
-    const target = active ? (run ? CONTROLLER.runSpeed : CONTROLLER.walkSpeed) : 0;
+    const target = active ? (run ? CONTROLLER.runSpeed : CONTROLLER.walkSpeed * amount) : 0;
     // Inertia: speed builds with `accel`, and with no input he glides to a halt
     // under `friction` (exponential damping — frame-rate independent).
     const air = this.grounded ? 1 : CONTROLLER.airControl;
@@ -367,7 +379,7 @@ export class Controller {
     this.camera.lookAt(_look);
 
     const run = clamp((this.speed - CONTROLLER.walkSpeed) / (CONTROLLER.runSpeed - CONTROLLER.walkSpeed), 0, 1);
-    const fov = CAMERA.fov + run * 6 * (this.grounded ? 1 : 0.5) + fx.fall * 22 + fx.fovKick;
+    const fov = this.fovBase + run * 6 * (this.grounded ? 1 : 0.5) + fx.fall * 22 + fx.fovKick;
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov += (fov - this.camera.fov) * damp(6, dt);
       this.camera.updateProjectionMatrix();
