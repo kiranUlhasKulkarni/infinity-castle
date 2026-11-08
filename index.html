@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#020103" />
+    <title>無限城 · Infinity Castle</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='5' y='5' width='22' height='22' fill='%23140804' stroke='%23ff7a2a' stroke-width='2'/><path d='M16 6v20M6 16h20' stroke='%23ff7a2a' stroke-width='1.5'/></svg>"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- Intro gate: also the first click that unlocks audio (autoplay policy) -->
+    <div id="gate" class="gate" role="button" tabindex="0" aria-label="Enter the Infinity Castle">
+      <div class="gate__glow"></div>
+      <div class="gate__lattice"></div>
+      <div class="gate__inner">
+        <h1 class="gate__title">無限城</h1>
+        <p class="gate__sub">INFINITY CASTLE</p>
+        <div class="gate__bar"><span id="gate-bar"></span></div>
+        <p id="gate-prompt" class="gate__prompt">Loading…</p>
+        <p class="gate__note">There is no exit.</p>
+      </div>
+    </div>
+
+    <!-- Cinematic bars during the opening plunge -->
+    <div id="letterbox" class="letterbox" aria-hidden="true"><i></i><i></i></div>
+
+    <!-- Controls hint (fades after a few seconds) -->
+    <div id="hint" class="hint">
+      <span><b>W A S D</b> move</span><span><b>Shift</b> run</span><span><b>Space</b> jump</span><span><b>K</b> Kanao</span><span><b>Mouse</b> look</span><span><b>Wheel</b> zoom</span><span><b>Esc</b> release cursor</span>
+    </div>
+
+    <!-- Music indicator: click to mute / unmute -->
+    <button id="viz" class="viz" type="button" aria-label="Mute music" aria-pressed="false">
+      <span></span><span></span><span></span><span></span><span></span>
+    </button>
+
+    <!-- Hidden YouTube player host (kept rendered but invisible) -->
+    <div id="yt-audio-host" aria-hidden="true"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
