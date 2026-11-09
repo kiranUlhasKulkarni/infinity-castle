@@ -1,4 +1,4 @@
-import { CASTLE } from '../config.js';
+import { CASTLE, POND } from '../config.js';
 import { mulberry32, wrapPositive, wrapSigned } from '../utils/math.js';
 
 /**
@@ -172,8 +172,13 @@ class PartSink {
     const cx = wrapPositive(c[0], P[0]), cy = wrapPositive(c[1], P[1]), cz = wrapPositive(c[2], P[2]);
     if (render) this.parts[cat].push({ c: [cx, cy, cz], s, q, info });
     if (collide && aabbExact) this.colliders.push([cx, cy, cz, h[0], h[1], h[2]]);
-    if (cat === CAT.lantern && render) this.lamps.push([cx, cy, cz]);
+    if (cat === CAT.lantern && render) this.lamps.push([cx, cy, cz, 0]);
     return true;
+  }
+  /** A light with no lantern mesh (the ice lotuses' cold glow): [x, y, z, cold]. */
+  light(c, cold = 1) {
+    const P = this.P;
+    this.lamps.push([wrapPositive(c[0], P[0]), wrapPositive(c[1], P[1]), wrapPositive(c[2], P[2]), cold]);
   }
 }
 
@@ -199,6 +204,10 @@ class Frame {
     const p = qRotate(this.q, x, y, z);
     const h = rotatedHalf(this.q, sx / 2, sy / 2, sz / 2);
     return !this.sink.clear.blocked(p[0] + this.t[0], p[1] + this.t[1], p[2] + this.t[2], h[0], h[1], h[2], this.owner, false);
+  }
+  light(x, y, z) {
+    const p = qRotate(this.q, x, y, z);
+    this.sink.light([p[0] + this.t[0], p[1] + this.t[1], p[2] + this.t[2]]);
   }
   wood(kind, x, y, z, sx, sy, sz, rnd, flags, localQ) {
     return this.part(CAT.wood, x, y, z, sx, sy, sz, [kind, rnd(), 0.6 + rnd() * 0.8, 0], flags, localQ);
@@ -515,6 +524,164 @@ function compound(f, rnd, spec) {
   }
 }
 
+/**
+ * Doma's Lotus Pond, in the deck's local frame (door level y = 0, room S × S).
+ *
+ *   • the bed: one slab under the whole hall, its top a shin's depth below
+ *     the doors; the water plane itself is drawn by castle/LotusPond.js,
+ *   • an engawa walkway ring at door level (any door opens onto it),
+ *   • a wide bridge (one step up) across the centre to a raised dais (another
+ *     step), with low rails you can step over into the water,
+ *   • shoji walls two storeys tall (icy paper: info.w = 1) with door openings
+ *     where walkways attach, pillars, nageshi beams and a coffered ceiling,
+ *   • ice lotuses scattered in clusters (positions only; the renderer draws
+ *     them) and cold light points so the castle shader lights the hall blue.
+ *
+ * Returns the pond record (local positions) for the renderer and the trigger.
+ */
+function lotusPond(f, rnd, { w: S, gaps }) {
+  const h = S / 2, E = POND.engawa, H = POND.height, BW = POND.bridgeWidth, DA = POND.dais;
+  const surf = -0.1, bed = surf - POND.waterDepth; // bed −0.38: steps down from the engawa without leaving the ground
+  const fl = { collide: true, walkway: true };
+  // the bed (the deck slab), thin enough for the trapdoor to cut
+  f.wood(KIND.floor, 0, bed - 0.32, 0, S, 0.64, S, rnd, fl);
+  // perimeter beams + pillars plunging into the void (the hall's silhouette from below)
+  for (const s of [-1, 1]) {
+    f.wood(KIND.beam, 0, bed - 0.9, s * (h - 0.3), S, 0.55, 0.5, rnd);
+    f.wood(KIND.beam, s * (h - 0.3), bed - 0.9, 0, 0.5, 0.55, S, rnd);
+  }
+  for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    const L = 10 + rnd() * 26;
+    f.wood(KIND.beam, px * (h - 0.6), bed - 0.6 - L / 2, pz * (h - 0.6), 0.8, L, 0.8, rnd, { collide: true });
+  }
+  // engawa ring (door level), with a kamachi edge beam along the water
+  const eT = -bed;
+  for (const s of [-1, 1]) {
+    f.wood(KIND.floor, 0, -eT / 2, s * (h - E / 2), S, eT, E, rnd, fl);
+    f.wood(KIND.floor, s * (h - E / 2), -eT / 2, 0, E, eT, S - 2 * E, rnd, fl);
+    f.wood(KIND.beam, 0, -0.07, s * (h - E + 0.09), S - 2 * E + 0.36, 0.16, 0.18, rnd);
+    f.wood(KIND.beam, s * (h - E + 0.09), -0.07, 0, 0.18, 0.16, S - 2 * E, rnd);
+  }
+  // the bridge: one step up, posts into the water, low rails (no collision: step off into the pond)
+  const b0 = -(h - E), b1 = h - E, bTop = 0.3;
+  f.wood(KIND.floor, 0, bTop - 0.2, 0, b1 - b0 + 0.3, 0.4, BW, rnd, fl);
+  for (const s of [-1, 1]) {
+    const z = s * (BW / 2 - 0.12);
+    for (let x = b0 + 1.2; x <= b1 - 1.2; x += 2.4) {
+      if (Math.abs(x) < DA / 2 + 0.3) continue;
+      f.wood(KIND.beam, x, (bed + bTop) / 2 - 0.1, z, 0.26, bTop - bed - 0.2, 0.26, rnd); // post
+      f.wood(KIND.rail, x, bTop + 0.28, z, 0.12, 0.56, 0.12, rnd); // rail post
+    }
+    for (const sx of [-1, 1]) {
+      const a0 = sx < 0 ? b0 + 0.6 : DA / 2 + 0.3, a1 = sx < 0 ? -DA / 2 - 0.3 : b1 - 0.6;
+      f.wood(KIND.rail, (a0 + a1) / 2, bTop + 0.58, z, a1 - a0, 0.08, 0.12, rnd);
+    }
+  }
+  // the dais (another step up), corner pillars with cold lights, border beams
+  const dTop = 0.6;
+  f.wood(KIND.floor, 0, (dTop + surf) / 2, 0, DA, dTop - surf, DA, rnd, fl);
+  for (const s of [-1, 1]) {
+    f.wood(KIND.beam, 0, dTop - 0.04, s * (DA / 2 - 0.1), DA, 0.1, 0.2, rnd);
+    f.wood(KIND.beam, s * (DA / 2 - 0.1), dTop - 0.04, 0, 0.2, 0.1, DA, rnd);
+  }
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    f.wood(KIND.beam, sx * (DA / 2 - 0.4), dTop + 1.6, sz * (DA / 2 - 0.4), 0.36, 3.2, 0.36, rnd, { collide: true });
+    f.light(sx * (DA / 2 - 0.4), dTop + 3.4, sz * (DA / 2 - 0.4));
+  }
+  f.light(0, 7, 0);
+
+  // shoji walls with door openings where walkways attach
+  const DOOR = 3.4;
+  const ice = () => [rnd(), 0.9, 1, 1]; // seed, lit fraction, storeys, cold paper
+  const wall = (side, ax, cross) => {
+    const list = (gaps[side] ?? []).map(([a, b]) => [Math.max(-h, a - 0.4), Math.min(h, b + 0.4)]).sort((p, q) => p[0] - q[0]);
+    const segs = [];
+    let s0 = -h;
+    for (const [g0, g1] of list) {
+      if (g0 > s0 + 0.2) segs.push([s0, g0]);
+      s0 = Math.max(s0, g1);
+    }
+    if (h > s0 + 0.2) segs.push([s0, h]);
+    const P = (a0, a1, y0, y1, cat, kind, th, flags) => {
+      const len = a1 - a0, mid = (a0 + a1) / 2, hh = y1 - y0, yc = (y0 + y1) / 2;
+      if (cat === CAT.house) {
+        if (ax === 'x') f.part(CAT.house, mid, yc, cross, len, hh, th, ice(), flags);
+        else f.part(CAT.house, cross, yc, mid, th, hh, len, ice(), flags);
+      } else if (ax === 'x') f.wood(kind, mid, yc, cross, len, hh, th, rnd, flags);
+      else f.wood(kind, cross, yc, mid, th, hh, len, rnd, flags);
+    };
+    for (const [a0, a1] of segs) P(a0, a1, 0, H, CAT.house, 0, 0.2, { collide: true });
+    for (const [g0, g1] of list) {
+      P(g0, g1, DOOR + 0.2, H, CAT.house, 0, 0.2, { collide: true }); // paper over the door
+      P(g0 - 0.2, g1 + 0.2, DOOR, DOOR + 0.22, 0, KIND.beam, 0.34, { collide: true }); // lintel
+    }
+    // pillars at the ends of every wall run and every ~6.8 m (never in a doorway)
+    const inDoor = (a) => list.some(([g0, g1]) => a > g0 - 0.3 && a < g1 + 0.3);
+    const posts = new Set([-h + 0.25, h - 0.25]);
+    for (const [g0, g1] of list) posts.add(g0 - 0.2).add(g1 + 0.2);
+    for (let a = -h + 6.8; a < h - 3; a += 6.8) if (!inDoor(a)) posts.add(a);
+    for (const a of posts) P(a - 0.22, a + 0.22, 0, H, 0, KIND.beam, 0.46, { collide: true });
+    // nageshi: horizontal beams at every storey line, on the room side
+    const inward = cross > 0 ? -0.18 : 0.18;
+    for (let y = DOOR * 2; y < H - 0.5; y += DOOR) {
+      if (ax === 'x') f.wood(KIND.beam, 0, y, cross + inward, S, 0.24, 0.16, rnd);
+      else f.wood(KIND.beam, cross + inward, y, 0, 0.16, 0.24, S, rnd);
+    }
+  };
+  wall('+z', 'x', h - 0.12);
+  wall('-z', 'x', -h + 0.12);
+  wall('+x', 'z', h - 0.12);
+  wall('-x', 'z', -h + 0.12);
+  // coffered ceiling: a lacquered slab and a grid of beams beneath it
+  f.wood(KIND.roof, 0, H + 0.3, 0, S + 1.4, 0.6, S + 1.4, rnd, { collide: true });
+  for (let a = -h + 5; a < h - 1; a += 5) {
+    f.wood(KIND.beam, a, H - 0.2, 0, 0.34, 0.4, S - 0.3, rnd);
+    f.wood(KIND.beam, 0, H - 0.45, a, S - 0.3, 0.3, 0.3, rnd);
+  }
+
+  // Renge Bodhisattva: Doma's ice Buddha on a lotus throne in the water at the back of
+  // the hall (the ±z half whose wall has fewer doors), facing the bridge. Only its
+  // collision lives here (throne + body boxes); castle/IceBuddha.js draws it.
+  const doorsOn = (sd) => (gaps[sd > 0 ? '+z' : '-z'] ?? []).length;
+  const bs = doorsOn(1) < doorsOn(-1) ? 1 : doorsOn(1) > doorsOn(-1) ? -1 : rnd() < 0.5 ? 1 : -1;
+  const BS = POND.buddhaScale;
+  const bz = bs * (h - E - 4.4);
+  const hidden = { collide: true, render: false };
+  f.wood(KIND.beam, 0, (bed + surf + 1.8 * BS) / 2, bz, 6.4 * BS, surf + 1.8 * BS - bed, 6.4 * BS, rnd, hidden); // throne
+  f.wood(KIND.beam, 0, surf + 6 * BS, bz, 5.6 * BS, 8.4 * BS, 4.4 * BS, rnd, hidden); // body
+  f.light(0, surf + 6.5 * BS, bz - bs * 3.5); // cold light washing its front
+
+  // ice lotuses: clusters on the open water (clear of the bridge, the dais, the engawa and the Buddha)
+  const lim = h - E - 0.8;
+  const open = (x, z) =>
+    Math.abs(x) < lim && Math.abs(z) < lim && Math.abs(z) > BW / 2 + 0.9 &&
+    !(Math.abs(x) < DA / 2 + 1 && Math.abs(z) < DA / 2 + 1) &&
+    !(Math.abs(x) < 4.6 * BS && Math.abs(z - bz) < 4.4 * BS);
+  const clusters = [];
+  for (let t = 0; clusters.length < 7 && t < 200; t++) {
+    const x = (rnd() * 2 - 1) * lim, z = (rnd() * 2 - 1) * lim;
+    if (open(x, z) && clusters.every(([cx, cz]) => Math.hypot(cx - x, cz - z) > 6)) clusters.push([x, z]);
+  }
+  const lot = [];
+  const pads = [];
+  const place = (list, n, spread, minGap, sMin, sMax) => {
+    for (let t = 0; list.length < n * 4 && t < n * 40; t++) {
+      const [cx, cz] = clusters[Math.floor(rnd() * clusters.length)] ?? [0, lim * 0.6];
+      const r = spread * Math.sqrt(-2 * Math.log(1 - rnd() * 0.999)) * 0.6, a = rnd() * Math.PI * 2;
+      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      if (!open(x, z)) continue;
+      let ok = true;
+      for (let i = 0; i < lot.length && ok; i += 4) if (Math.hypot(lot[i] - x, lot[i + 1] - z) < minGap) ok = false;
+      for (let i = 0; i < pads.length && ok; i += 4) if (Math.hypot(pads[i] - x, pads[i + 1] - z) < minGap * 0.8) ok = false;
+      if (ok) list.push(x, z, sMin + rnd() * (sMax - sMin), rnd() * Math.PI * 2);
+    }
+  };
+  place(lot, POND.lotuses, 3.2, 1.25, 0.75, 1.3);
+  place(pads, 45, 4.2, 0.9, 0.55, 1.1);
+  for (const [cx, cz] of clusters.slice(0, 6)) f.light(cx, surf + 2.4, cz); // above head height: a wash, not a hot spot
+  return { size: S, height: H, surf, bed, engawa: E, bridge: BW, dais: DA, bridgeTop: bTop, daisTop: dTop, buddha: { z: bz, facing: -bs, scale: BS }, lotus: Float32Array.from(lot), pads: Float32Array.from(pads) };
+}
+
 /* ───────────── main entry ───────────── */
 
 /**
@@ -595,8 +762,84 @@ export function generateLayout({ seed = CASTLE.seed, anchor = [0, 0, 0], shaftHe
       type[dk.id] = 0;
     }
   }
-  // deck clearance (walk space above each upright deck)
-  for (const dk of decks.values()) clear.add(dk.x, dk.y + HEAD_ROOM / 2 - 0.3, dk.z, dk.w / 2, HEAD_ROOM / 2 + 0.3, dk.d / 2, dk.id);
+  // Doma's Lotus Pond: a few decks become the boss room. One is right next to the
+  // deck you land on — the neighbouring cell, level with the pad and joined to it
+  // by its own flat bridge (its icy walls are the first thing you see); the rest
+  // are on other floors. The hall is two storeys tall, so the space above it is cleared.
+  {
+    const pr = mulberry32(seed * 977 + 3);
+    const S = POND.size;
+    const wrapI = (d, n) => Math.abs(d - n * Math.round(d / n));
+    const neighbours = (dk) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([a, b]) => decks.has(idx(dk.i + a, dk.j, dk.k + b))).length;
+    const chosen = [];
+    const ok = (dk) =>
+      !dk.isAnchor &&
+      !(dk.i === ai && dk.k === ak) && // never in the pad's fall column
+      neighbours(dk) >= 2 &&
+      chosen.every((c) => wrapI(dk.j - c.j, ny) >= 3);
+    const pick = (list) => list[Math.floor(pr() * list.length)];
+    const all = [...decks.values()];
+    // 1st: an orthogonal neighbour of the pad, far enough off its edge for a bridge
+    const sides = [[1, 0, 'x'], [-1, 0, 'x'], [0, 1, 'z'], [0, -1, 'z']];
+    for (let n = sides.length - 1; n > 0; n--) {
+      const m = Math.floor(pr() * (n + 1));
+      [sides[n], sides[m]] = [sides[m], sides[n]];
+    }
+    let first = null;
+    const gapOK = (di, dkk, axis) => {
+      const centre = axis === 'x' ? (ai + di) * cx + cx / 2 : (ak + dkk) * cz + cz / 2;
+      const padC = axis === 'x' ? pad.x : pad.z, padHalf = axis === 'x' ? pad.w / 2 : pad.d / 2;
+      // (−1: the hall's jitter) — the pad may poke out of its cell toward this side
+      return Math.abs(wrapSigned(centre - padC, axis === 'x' ? P[0] : P[2])) - padHalf - S / 2 - 1 >= 3;
+    };
+    // an existing deck beside the pad if there is one; otherwise build one in an empty / Escher cell there
+    for (const pass of [0, 1]) {
+      for (const [di, dkk, axis] of sides) {
+        if (first || !gapOK(di, dkk, axis)) continue;
+        const id = idx(ai + di, aj, ak + dkk);
+        let dk = decks.get(id);
+        if (pass === 0 && !(dk && ok(dk))) continue;
+        if (pass === 1) {
+          if (dk || !chosen.every((c) => wrapI(aj - c.j, ny) >= 3)) continue;
+          const i = (((ai + di) % nx) + nx) % nx, k = (((ak + dkk) % nz) + nz) % nz;
+          dk = { id, i, j: aj, k, x: 0, y: 0, z: 0, w: S, d: S, isAnchor: false, gaps: { '+x': [], '-x': [], '+z': [], '-z': [] }, up: 0 };
+          decks.set(id, dk);
+          type[id] = 1;
+        }
+        first = dk;
+        dk.linkPad = { axis, padFirst: di + dkk > 0 }; // walkways run a → b along +axis
+        dk.y = pad.y; // level with the pad: a flat bridge, no stairs
+      }
+    }
+    // fallback: somewhere else on the landing floor, a couple of cells away
+    first ??= pick(all.filter((dk) => dk.j === aj && Math.max(wrapI(dk.i - ai, nx), wrapI(dk.k - ak, nz)) >= 2 && ok(dk)));
+    if (first) chosen.push(first);
+    for (let t = 0; t < 60 && chosen.length < POND.perPeriod; t++) {
+      const dk = pick(all);
+      if (dk && ok(dk)) chosen.push(dk);
+    }
+    for (const dk of chosen) {
+      dk.pond = true;
+      dk.w = dk.d = S;
+      const jx = Math.max(0, (cx - S) / 2 - 1.2), jz = Math.max(0, (cz - S) / 2 - 1.2);
+      dk.x = dk.i * cx + cx / 2 + (pr() * 2 - 1) * jx;
+      dk.z = dk.k * cz + cz / 2 + (pr() * 2 - 1) * jz;
+      const up = idx(dk.i, dk.j + 1, dk.k);
+      decks.delete(up);
+      type[up] = 0;
+      // (a hall raised to the pad's level may reach two layers up: clear whatever deck it would hit)
+      const up2 = decks.get(idx(dk.i, dk.j + 2, dk.k));
+      if (up2 && wrapSigned(up2.y - dk.y, P[1]) < POND.height + 3) {
+        decks.delete(up2.id);
+        type[up2.id] = 0;
+      }
+    }
+  }
+  // deck clearance (walk space above each upright deck; the whole hall for a pond)
+  for (const dk of decks.values()) {
+    if (dk.pond) clear.add(dk.x, dk.y + (POND.height - 0.2) / 2, dk.z, dk.w / 2, (POND.height + 1.8) / 2, dk.d / 2, dk.id);
+    else clear.add(dk.x, dk.y + HEAD_ROOM / 2 - 0.3, dk.z, dk.w / 2, HEAD_ROOM / 2 + 0.3, dk.d / 2, dk.id);
+  }
 
   /* 3 ─ walkways between upright decks */
   let walkOwner = N + 10;
@@ -639,6 +882,12 @@ export function generateLayout({ seed = CASTLE.seed, anchor = [0, 0, 0], shaftHe
     b.gaps[gb].push([gapB - gw, gapB + gw]);
     return true;
   };
+  // the landing deck's own bridge to Doma's hall (first, so nothing else takes its space)
+  for (const dk of decks.values()) {
+    if (!dk.linkPad) continue;
+    const { axis, padFirst } = dk.linkPad;
+    dk.padLinked = padFirst ? tryLink(pad, dk, axis, false) : tryLink(dk, pad, axis, false);
+  }
   for (const a of decks.values()) {
     for (const axis of ['x', 'z']) {
       const nb = axis === 'x' ? decks.get(idx(a.i + 1, a.j, a.k)) : decks.get(idx(a.i, a.j, a.k + 1));
@@ -670,7 +919,7 @@ export function generateLayout({ seed = CASTLE.seed, anchor = [0, 0, 0], shaftHe
     for (const wk of walkways) if (wk.a !== undefined) parent.set(find(wk.a), find(wk.b));
     const sizes = new Map();
     for (const k of decks.keys()) sizes.set(find(k), (sizes.get(find(k)) ?? 0) + 1);
-    return { decks: decks.size, walkways: walkways.length, flat: walkways.filter((w) => w.flat).length, largestGroup: Math.max(...sizes.values()), padGroup: sizes.get(find(idx(ai, aj, ak))) };
+    return { pondNextToPad: [...decks.values()].some((d) => d.padLinked), decks: decks.size, walkways: walkways.length, flat: walkways.filter((w) => w.flat).length, largestGroup: Math.max(...sizes.values()), padGroup: sizes.get(find(idx(ai, aj, ak))) };
   })();
 
   /* 4 ─ build walkways (before compounds so their parts respect walkway space) */
@@ -683,10 +932,19 @@ export function generateLayout({ seed = CASTLE.seed, anchor = [0, 0, 0], shaftHe
     // landing posts with lanterns at both ends
   }
 
-  /* 5 ─ upright compounds */
+  /* 5 ─ upright compounds (and the ponds) */
+  const ponds = [];
   for (const dk of decks.values()) {
     const f = new Frame(sink, QI, [dk.x, dk.y, dk.z], dk.id);
     const fr = mulberry32(dk.id * 104729 + seed * 13);
+    // a pond no walkway reached stays an ordinary (huge) deck
+    if (dk.pond && Object.values(dk.gaps).some((l) => l.length)) {
+      const rec = lotusPond(f, fr, dk);
+      rec.c = [wrapPositive(dk.x, P[0]), wrapPositive(dk.y, P[1]), wrapPositive(dk.z, P[2])];
+      rec.doors = Object.values(dk.gaps).reduce((n, l) => n + l.length, 0);
+      ponds.push(rec);
+      continue;
+    }
     const avoid = dk.isAnchor ? [wrapSigned(A[0] - dk.x, P[0]), wrapSigned(A[2] - dk.z, P[2])] : null;
     compound(f, fr, { w: dk.w, d: dk.d, gaps: dk.gaps, avoid, upright: true, allowBalcony: !dk.isAnchor });
   }
@@ -737,7 +995,8 @@ export function generateLayout({ seed = CASTLE.seed, anchor = [0, 0, 0], shaftHe
   }
 
   const out = pack(sink, P, A);
-  out.stats = stats;
+  out.ponds = ponds;
+  out.stats = { ...stats, ponds: ponds.length };
   return out;
 }
 
@@ -757,7 +1016,7 @@ function pack(sink, period, anchor) {
   const nc = sink.colliders.length;
   const colliders = new Float32Array(nc * 6);
   sink.colliders.forEach((c, i) => colliders.set(c, i * 6));
-  const lamps = new Float32Array(sink.lamps.length * 3);
-  sink.lamps.forEach((l, i) => lamps.set(l, i * 3));
-  return { period, wood: cats[0], house: cats[1], lantern: cats[2], colliders, colliderCount: nc, lamps, lampCount: sink.lamps.length, anchor };
+  const lamps = new Float32Array(sink.lamps.length * 4); // x, y, z, cold (1 = an ice lotus glow)
+  sink.lamps.forEach((l, i) => lamps.set(l, i * 4));
+  return { period, wood: cats[0], house: cats[1], lantern: cats[2], colliders, colliderCount: nc, lamps, lampCount: sink.lamps.length, anchor, ponds: [] };
 }

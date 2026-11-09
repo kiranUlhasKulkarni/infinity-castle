@@ -18,6 +18,12 @@ function compose(out, o, px, py, pz, qx, qy, qz, qw, sx, sy, sz) {
   out[o + 12] = px; out[o + 13] = py; out[o + 14] = pz; out[o + 15] = 1;
 }
 
+/** A lamp's light colour (linear, × intensity): warm lantern, or an ice lotus's cyan glow; `b` cools warm ones. */
+export function lampColor(cold, b, out) {
+  if (cold) return out.set(0.32, 0.78, 1.5).multiplyScalar(1.7);
+  return out.set(1.0 + (0.4 - 1.0) * b, 0.42 + (0.78 - 0.42) * b, 0.14 + (1.3 - 0.14) * b).multiplyScalar(2.0);
+}
+
 /** Spatial key so the morph pairs nearby old blocks with nearby new ones (coherent slides, not a swarm). */
 function spatialKey(x, y, z) {
   const ix = Math.floor(x / 12) & 63, iy = Math.floor(y / 12) & 63, iz = Math.floor(z / 12) & 63;
@@ -121,7 +127,7 @@ export class CastleMeshes {
     this.lampN = P.map((p) => Math.ceil(p / LAMP_GRID));
     const grid = new Map();
     for (let i = 0; i < layout.lampCount; i++) {
-      const x = layout.lamps[i * 3], y = layout.lamps[i * 3 + 1], z = layout.lamps[i * 3 + 2];
+      const x = layout.lamps[i * 4], y = layout.lamps[i * 4 + 1], z = layout.lamps[i * 4 + 2];
       const key = this.lampKey(Math.floor(x / LAMP_GRID), Math.floor(y / LAMP_GRID), Math.floor(z / LAMP_GRID));
       let l = grid.get(key);
       if (!l) grid.set(key, (l = []));
@@ -148,20 +154,21 @@ export class CastleMeshes {
           const list = this.lampGrid.get(this.lampKey(i, j, k));
           if (!list) continue;
           for (const id of list) {
-            const x = this.lamps[id * 3], y = this.lamps[id * 3 + 1], z = this.lamps[id * 3 + 2];
+            const x = this.lamps[id * 4], y = this.lamps[id * 4 + 1], z = this.lamps[id * 4 + 2];
             const wx = p.x + wrapSigned(x - p.x, Px), wy = p.y + wrapSigned(y - p.y, Py), wz = p.z + wrapSigned(z - p.z, Pz);
             const d2 = (wx - p.x) ** 2 + (wy - p.y) ** 2 + (wz - p.z) ** 2;
-            found.push({ x: wx, y: wy, z: wz, d2, id });
+            found.push({ x: wx, y: wy, z: wz, d2, id, cold: this.lamps[id * 4 + 3] });
           }
         }
     found.sort((a, b) => a.d2 - b.d2);
     const pos = castleUniforms.uLampPos.value, col = castleUniforms.uLampCol.value;
+    const b = castleUniforms.uBiome.value * 0.55; // in Doma's room even the lanterns run cold
     for (let i = 0; i < MAX_LAMPS; i++) {
       const l = found[i];
       if (l) {
         pos[i].set(l.x, l.y, l.z);
         const flick = 0.9 + 0.1 * Math.sin(castleUniforms.uTime.value * (3 + (l.id % 7)) + l.id);
-        col[i].set(1.0, 0.42, 0.14).multiplyScalar(2.0 * flick);
+        lampColor(l.cold, b, col[i]).multiplyScalar(flick);
       } else {
         pos[i].set(0, -1e5, 0);
         col[i].set(0, 0, 0);

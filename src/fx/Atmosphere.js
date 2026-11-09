@@ -9,6 +9,7 @@ import { mulberry32 } from '../utils/math.js';
  *  • ember motes drifting up through the air (world-space, wrapped around the
  *    camera so they're infinite too — when you fall they rush past you),
  *  • speed streaks that only appear in freefall,
+ *    (in Doma's room they turn to drifting frost motes),
  *  • a brief warm burst of the same embers (HDR, so the bloom catches it) —
  *    the glow between Tanjiro and Kanao in the 'K' moment.
  */
@@ -118,12 +119,14 @@ export class Atmosphere {
             vSeed = aSeed;
           }`,
         fragmentShader: /* glsl */ `
+          uniform float uBiome;
           varying float vAlpha;
           varying float vSeed;
           void main() {
             vec2 c = gl_PointCoord - 0.5;
             float a = smoothstep(0.5, 0.0, length(c));
             vec3 col = mix(vec3(1.0, 0.36, 0.08), vec3(1.0, 0.66, 0.3), vSeed);
+            col = mix(col, mix(vec3(0.35, 0.7, 1.0), vec3(0.75, 0.9, 1.0), vSeed) * 0.75, uBiome); // embers → frost motes
             gl_FragColor = vec4(col * a * vAlpha * 1.6, 1.0);
           }`,
       }),

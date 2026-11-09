@@ -1,5 +1,5 @@
 import { Quaternion, Vector3 } from 'three';
-import { CAMERA, CONTROLLER } from '../config.js';
+import { CAMERA, CONTROLLER, POND } from '../config.js';
 import { angleDelta, clamp, damp, lerp } from '../utils/math.js';
 
 const DOWN = new Vector3(0, -1, 0);
@@ -25,6 +25,9 @@ export const INTERACT = { approachMax: 5, kiss: 3, release: 0.9, distance: 0.6 }
  *  Walls   capsule push-out against the same nearby boxes.
  *  Camera  a smoothed pivot at shoulder height behind him, pulled in when a wall
  *          is between pivot and lens (a second raycast).
+ *  Water   in Doma's Lotus Pond `water.level(pos)` reports the surface; while he
+ *          wades (feet below it) he's a little slower and every stride drops a
+ *          ripple ring at the foot that's down (`water.ripple`), a landing a big one.
  */
 export class Controller {
   constructor(camera, dom, character, collision) {
@@ -57,6 +60,11 @@ export class Controller {
     this.locked = false; // cinematic: look around, but no walking
     this.camCollide = false; // keep the lens out of walls even while scripted (inside the opening's room)
     this.windupT = 0; // jump anticipation timer
+    this.water = null; // { level(pos) → surface y | null, ripple(x, z, strength) } — the Lotus Pond (set by main)
+    this.wading = false;
+    this.rippleT = 0;
+    this.rippleSide = 1;
+    this.onSplash = null;
     this.jumpQueued = false;
     this.interactQueued = false;
     this.interaction = 'none'; // none | approach | kiss | release
@@ -164,7 +172,7 @@ export class Controller {
     const busy = this.interaction !== 'none'; // the 'K' moment: no walking
     const active = this.enabled && !this.locked && !this.scripted && !busy && wl > 0;
     if (wl > 0) { wx /= wl; wz /= wl; }
-    const target = active ? (run ? CONTROLLER.runSpeed : CONTROLLER.walkSpeed * amount) : 0;
+    const target = (active ? (run ? CONTROLLER.runSpeed : CONTROLLER.walkSpeed * amount) : 0) * (this.wading ? POND.wadeSpeed : 1);
     // Inertia: speed builds with `accel`, and with no input he glides to a halt
     // under `friction` (exponential damping — frame-rate independent).
     const air = this.grounded ? 1 : CONTROLLER.airControl;
@@ -192,6 +200,7 @@ export class Controller {
       this.grounded = false;
       this.airTime = 0;
     }
+    this.updateWading(dt, landed);
 
     const windup = this.windupT > 0 ? 1 - this.windupT / CONTROLLER.jumpWindup : 0;
     this.char.root.position.copy(this.pos);
@@ -217,6 +226,30 @@ export class Controller {
     st.interaction = this.interaction;
     st.faceHeading = this.faceHeading;
     this.updateCamera(dt);
+  }
+
+  /** Shallow water: ripple rings at his feet, a splash ring on landing. */
+  updateWading(dt, landed) {
+    const W = this.water;
+    const lvl = W && this.grounded && !this.scripted ? W.level(this.pos) : null;
+    const wading = lvl !== null && lvl > this.pos.y + 0.02;
+    if (wading && !this.wading) this.rippleT = 0; // first step in: a ring right away
+    this.wading = wading;
+    if (!wading) return;
+    if (landed) {
+      W.ripple(this.pos.x, this.pos.z, Math.min(1.6, 0.6 + landed));
+      this.onSplash?.(Math.min(1, 0.4 + landed));
+    }
+    this.rippleT -= dt;
+    if (this.rippleT > 0) return;
+    const moving = this.speed > 0.4;
+    // one ring per stride, at the foot that's down (alternating sides); a slow ring when he stands still
+    this.rippleT = moving ? clamp(1.6 / (this.speed + 2), 0.18, 0.42) : 1.5;
+    this.rippleSide = -this.rippleSide;
+    const s = moving ? 0.13 * this.rippleSide : 0;
+    const rx = Math.cos(this.heading) * s, rz = -Math.sin(this.heading) * s; // perpendicular to his heading
+    W.ripple(this.pos.x + rx + this.vel.x * 0.06, this.pos.z + rz + this.vel.z * 0.06, moving ? Math.min(0.75, 0.3 + this.speed * 0.05) : 0.16);
+    if (moving) this.onSplash?.(Math.min(0.6, 0.15 + this.speed * 0.04));
   }
 
   /** 'K': approach → kiss (3 s) → release → exploring again. */

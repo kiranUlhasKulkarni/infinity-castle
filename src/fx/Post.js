@@ -21,6 +21,7 @@ const FinalShader = {
     uAberration: { value: 0 },
     uZoom: { value: 0 },
     uFlash: { value: 0 },
+    uCold: { value: 0 },
     uRes: { value: new Vector2(1, 1) },
   },
   vertexShader: /* glsl */ `
@@ -28,7 +29,7 @@ const FinalShader = {
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uAberration, uZoom, uFlash;
+    uniform float uTime, uAberration, uZoom, uFlash, uCold;
     uniform vec2 uRes;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -49,7 +50,8 @@ const FinalShader = {
         col = mix(col, acc / 7.0, smoothstep(0.08, 0.45, r));
       }
       // warm grade: lift the blacks toward ink-brown, keep highlights golden
-      col = mix(col, col * vec3(1.04, 0.97, 0.9), 0.6);
+      // (Doma's room: a cold grade, blacks sink to blue-black)
+      col = mix(col, col * mix(vec3(1.04, 0.97, 0.9), vec3(0.86, 0.98, 1.12), uCold), 0.6);
       col *= mix(1.0, smoothstep(0.92, 0.18, r), 0.78);
       col += vec3(1.0, 0.12, 0.08) * uFlash * (0.35 + 0.65 * smoothstep(0.75, 0.0, r)) * 0.55;
       col += (hash(vUv * uRes + fract(uTime * 7.13) * 100.0) - 0.5) * 0.035;
@@ -71,6 +73,23 @@ export class Post {
     this.final = new ShaderPass(FinalShader);
     this.composer.addPass(this.final);
     this.baseBloom = b.strength;
+    this.cold = 0;
+  }
+
+  /**
+   * Biome tint, 0 = warm castle, 1 = Doma's room: the bloom's mip tints swing
+   * from amber to cyan (wide mips most, so the haze around every glow turns
+   * icy) and the final grade cools.
+   */
+  setBiome(k) {
+    if (k === this.cold) return;
+    this.cold = k;
+    const tints = this.bloom.bloomTintColors;
+    for (let i = 0; i < tints.length; i++) {
+      const w = k * (0.6 + 0.1 * i);
+      tints[i].set(1 - 0.45 * w, 1 - 0.12 * w, 1 + 0.3 * w); // white (the warm look as it was) → cyan
+    }
+    this.final.uniforms.uCold.value = k;
   }
 
   setSize(w, h, pr) {

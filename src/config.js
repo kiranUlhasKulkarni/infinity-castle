@@ -111,6 +111,31 @@ export const BIWA = {
   sampleUrl: null,
 };
 
+/**
+ * Doma's Lotus Pond: a rare boss room. A few upright decks per castle become a
+ * vast hall of shallow black water under icy shoji walls, crossed by a wide
+ * bridge to a central dais, with glowing ice lotuses on the surface. Stepping
+ * inside chills the whole palette (lights, ambient, bloom) to cyan.
+ */
+export const POND = {
+  perPeriod: 3, // ponds per castle block (one is always on the floor you land on, a few decks away)
+  size: 40, // room width / depth (m) — fills a whole generation cell
+  height: 16, // shoji walls rise this high to a coffered ceiling
+  engawa: 3.2, // walkway ring around the water (doors open onto it)
+  bridgeWidth: 5.2,
+  dais: 10, // the raised platform where the bridge crosses the centre
+  waterDepth: 0.28, // shallow: he wades up to the shins (the water slows him a little)
+  wadeSpeed: 0.82,
+  lotuses: 70,
+  transitionSeconds: 3, // warm → cold palette lerp on entering / leaving
+  // Renge Bodhisattva: the ice Buddha seated at the back of the water
+  buddhaScale: 1.25, // ≈ 11 m tall seated
+  attackSeconds: 15, // the Icicle Breath fires this often while you're near the hall
+  icicles: 170, // per breath
+  mist: 150, // drifting mist puffs per hall (half on touch devices)
+  iceFog: 0.03, // extra pale-blue haze density while inside (0 outside: the castle's void stays black)
+};
+
 export const CROWS = {
   count: 150,
   speed: 13,

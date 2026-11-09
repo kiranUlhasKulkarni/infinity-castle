@@ -30,7 +30,8 @@ export function fallDistance(t, v0 = 0, terminal = FALL_TERMINAL) {
  *      a clear shaft above it; collision returns and he lands.
  */
 export class BiwaDrop {
-  constructor({ controller, castle, collision, audio, onShift, seed }) {
+  constructor({ controller, castle, collision, audio, onShift, seed, onCommit = null }) {
+    this.onCommit = onCommit; // the new layout is live (the Lotus Ponds follow it)
     this.c = controller;
     this.castle = castle;
     this.collision = collision;
@@ -52,6 +53,7 @@ export class BiwaDrop {
     this.pending = null;
     this.reqId = 0;
     this.armed = false; // the hidden timer starts after the opening
+    this.safe = false; // inside a Lotus Pond hall: no trap fires
     // warm the worker up (module load + JIT) long before the first trap, so the
     // real request comes back in ~0.5 s instead of missing the fall
     this.worker?.postMessage({ id: -1, seed: seed + 1, anchor: [0, 0, 0], shaftHeight: 0 });
@@ -130,7 +132,8 @@ export class BiwaDrop {
     rimUniform.value.setRGB(1.0, 0.45 - 0.33 * fx.flash, 0.18 - 0.1 * fx.flash);
 
     if (this.state === 'idle') {
-      if (this.armed && this.c.enabled && this.c.grounded && this.c.interaction === 'none') {
+      // Doma's hall is a safe zone: the timer pauses while he's inside (main sets `safe`) and resumes on the way out
+      if (this.armed && !this.safe && this.c.enabled && this.c.grounded && this.c.interaction === 'none') {
         this.timer -= dt;
         if (this.timer <= 0) this.trigger('strum');
       }
@@ -169,6 +172,7 @@ export class BiwaDrop {
     const committedNow = this.castle.update(dt);
     if (committedNow) {
       this.collision.setLayout(this.pending);
+      this.onCommit?.(this.pending);
       this.committed = true;
     }
 

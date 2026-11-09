@@ -206,6 +206,101 @@ export class AudioEngine {
     n.start(t);
   }
 
+  /** A wading step / splash in shallow water: a filtered slosh plus a small bubble "plip". */
+  splash(strength = 0.3) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const n = ctx.createBufferSource();
+    n.buffer = this.noiseSplash ??= this.noiseBuffer(0.4);
+    n.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(900 + Math.random() * 500, t);
+    f.frequency.exponentialRampToValueAtTime(420, t + 0.25);
+    f.Q.value = 0.9;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22 * strength, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18 + strength * 0.3);
+    n.connect(f).connect(g).connect(this.master);
+    g.connect(this.reverb);
+    n.start(t);
+    n.stop(t + 0.5);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    const f0 = 500 + Math.random() * 400;
+    o.frequency.setValueAtTime(f0, t + 0.03);
+    o.frequency.exponentialRampToValueAtTime(f0 * 2.2, t + 0.09);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t + 0.03);
+    og.gain.exponentialRampToValueAtTime(0.05 * strength, t + 0.04);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(og).connect(this.master);
+    o.start(t + 0.03);
+    o.stop(t + 0.12);
+  }
+
+  /** The Icicle Breath: a long frozen exhale (hiss falling through a band) over a low groan. */
+  iceBreath() {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const n = ctx.createBufferSource();
+    n.buffer = this.noiseLong ??= this.noiseBuffer(2);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 0.7;
+    f.frequency.setValueAtTime(5200, t);
+    f.frequency.exponentialRampToValueAtTime(900, t + 1.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.32, t + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    n.connect(f).connect(g).connect(this.master);
+    g.connect(this.reverb);
+    n.start(t);
+    n.stop(t + 1.7);
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(55, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 1.2);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 220;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.18, t + 0.2);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    o.connect(lp).connect(og).connect(this.master);
+    og.connect(this.reverb);
+    o.start(t);
+    o.stop(t + 1.5);
+  }
+
+  /** An icicle striking: a glassy ping (kind 1 wood, 2 water, 3 wall). */
+  iceHit(vol = 0.5, kind = 1) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const base = kind === 2 ? 1400 : 2400 + Math.random() * 1800;
+    for (const [mul, a] of [[1, 1], [2.76, 0.4]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = base * mul;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.06 * vol * a, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 2 ? 0.12 : 0.35));
+      o.connect(g).connect(this.master);
+      g.connect(this.reverb);
+      o.start(t);
+      o.stop(t + 0.4);
+    }
+    if (kind === 2) this.splash(0.25 * vol);
+    else this.step(4 * vol); // the thunk into wood / paper
+  }
+
   thud(strength = 1) {
     if (!this.ready) return;
     const ctx = this.ctx;

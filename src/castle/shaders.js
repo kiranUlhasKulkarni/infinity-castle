@@ -21,6 +21,8 @@ export const castleUniforms = {
   uPulse: { value: 0 }, // Biwa strum: the paper flares blood-red
   uLampFade: { value: 1 },
   uShojiBrightness: { value: CASTLE.shojiBrightness },
+  uBiome: { value: 0 }, // 0 = the castle's warm lantern glow, 1 = Doma's freezing blue (lerped over 3 s)
+  uIceFog: { value: 0 }, // pale-blue haze density inside Doma's hall (0 everywhere else: the void stays black)
 };
 
 export const GLSL_COMMON = /* glsl */ `
@@ -38,6 +40,8 @@ export const GLSL_COMMON = /* glsl */ `
   uniform float uLampFade;
   uniform float uMinSize;
   uniform float uShojiBrightness;
+  uniform float uBiome;
+  uniform float uIceFog;
 
   float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -68,7 +72,10 @@ export const GLSL_COMMON = /* glsl */ `
     vec3 v = wp - cameraPosition;
     float d = length(v);
     float f = 1.0 - exp(-density * density * d * d);
-    return mix(col, voidColor(v / max(d, 1e-3)), f);
+    col = mix(col, voidColor(v / max(d, 1e-3)), f);
+    // Doma's frost: a pale-blue haze that thickens with distance (only while inside his hall)
+    float fi = 1.0 - exp(-uIceFog * uIceFog * d * d);
+    return mix(col, vec3(0.11, 0.19, 0.26), fi * 0.65);
   }
   float glowTransmit(vec3 wp) {
     float d = length(wp - cameraPosition);
@@ -93,6 +100,8 @@ export const GLSL_COMMON = /* glsl */ `
     sum += uHeroLight * (1.0 / (1.0 + h2 * 0.035)) * (0.3 + 0.7 * max(dot(n, H), 0.0));
     vec3 amb = mix(vec3(0.01, 0.005, 0.005), vec3(0.11, 0.038, 0.016), field * field);
     amb += vec3(0.05, 0.012, 0.01) * max(-n.y, 0.0); // crimson bounce from the abyss below
+    vec3 ambCold = mix(vec3(0.004, 0.008, 0.014), vec3(0.03, 0.075, 0.12), field * field) + vec3(0.006, 0.02, 0.04) * max(-n.y, 0.0);
+    amb = mix(amb, ambCold, uBiome);
     amb *= 0.8 + 0.2 * max(n.y, 0.0);
     return sum + amb + vec3(0.9, 0.12, 0.06) * uPulse * 0.6;
   }
@@ -203,6 +212,8 @@ const WOOD_FRAG = /* glsl */ `
       albedo = mix(straw, vec3(0.03, 0.025, 0.03), max(heri, seamT * 0.8));
     }
 
+    // Doma's room: the cold leaches the colour out of the wood
+    albedo = mix(albedo, vec3(dot(albedo, vec3(0.3, 0.55, 0.15))) * vec3(0.85, 0.97, 1.12), uBiome * 0.5);
     vec3 col = albedo * castleLight(vWorld, n, vField);
     float ink = inkEdge(uv, sz, kind > 3.5 ? 0.012 : 0.028);
     col = mix(col, vec3(0.006, 0.003, 0.002), ink * 0.9);
@@ -273,6 +284,8 @@ const SHOJI_FRAG = /* glsl */ `
       float flick = 1.0 + 0.07 * sin(uTime * (1.5 + rnd * 4.0) + rnd * 40.0) * sin(uTime * 7.3 + rnd2 * 9.0);
       float inner = clamp(1.15 - 0.6 * length((pq - vec2(0.5, 0.32)) * vec2(1.1, 0.8)), 0.25, 1.0);
       vec3 warm = mix(vec3(1.0, 0.27, 0.05), vec3(1.0, 0.46, 0.15), rnd2);
+      vec3 ice = mix(vec3(0.42, 0.72, 1.0), vec3(0.62, 0.86, 1.0), rnd2); // Doma's hall: frosted paper, moonlit from behind
+      warm = mix(warm, ice, max(vInfo.w, uBiome * 0.6));
       warm = mix(warm, vec3(1.0, 0.07, 0.04), uPulse);
       float inten = (lit * (0.75 + 1.55 * rnd2) + 0.035) * flick * (1.0 + uPulse * 2.5);
 
@@ -290,8 +303,8 @@ const SHOJI_FRAG = /* glsl */ `
       float far = smoothstep(0.25, 0.7, fwu);
       emissive = mix(emissive, warm * 1.5 * litP * 0.45 * (1.0 + uPulse * 2.5), far);
 
-      vec3 frameWood = vec3(0.13, 0.055, 0.028);
-      vec3 paperAlb = vec3(0.32, 0.24, 0.18);
+      vec3 frameWood = mix(vec3(0.13, 0.055, 0.028), vec3(0.05, 0.045, 0.05), vInfo.w);
+      vec3 paperAlb = mix(vec3(0.32, 0.24, 0.18), vec3(0.24, 0.28, 0.32), vInfo.w);
       diffuse = mix(paperAlb, frameWood, max(frame, lattice) * (1.0 - far * 0.6)) * light;
     }
 
@@ -320,6 +333,7 @@ const LANTERN_FRAG = /* glsl */ `
       float bulge = sin((v - 0.1) / 0.8 * 3.14159);
       float flick = 0.88 + 0.12 * sin(uTime * (3.0 + seed * 3.0) + seed * 50.0) * sin(uTime * 11.0 + seed * 20.0);
       vec3 warm = mix(vec3(1.0, 0.24, 0.05), vec3(1.0, 0.42, 0.12), seed);
+      warm = mix(warm, vec3(0.45, 0.75, 1.0), uBiome * 0.55);
       warm = mix(warm, vec3(1.0, 0.05, 0.03), uPulse);
       col = warm * (1.5 + 1.3 * power) * flick * (0.55 + 0.45 * bulge) * (1.0 - rib * 0.55) * (1.0 + uPulse * 2.0);
       col *= glowTransmit(vWorld);

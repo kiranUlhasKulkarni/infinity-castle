@@ -64,6 +64,8 @@ src/castle/
   layout.js                    procedural generator (pure data; also runs in a worker)
   layout.worker.js             builds the next castle off the main thread
   CastleMeshes.js              the 3 InstancedMeshes, trapdoor, morph, assembly
+  LotusPond.js                 Doma's Lotus Pond: the water shader, ice lotuses, mist, biome trigger
+  IceBuddha.js                 Renge Bodhisattva (procedural ice Buddha) and the 15 s Icicle Breath
   shaders.js                   wood / tatami / shoji / lantern shaders, fog, lighting
   Collision.js                 spatial hash + Raycaster proxy + capsule push-out
   buckets.js                   the collision spatial hash as flat arrays (built in the worker)
@@ -88,6 +90,63 @@ kanao.glb                      Kanao, copied from ../fireworks/public/models (fi
 * **Rendering.** About 90k instances are drawn in 3 draw calls (wood, shoji houses, lanterns). The vertex shader draws each instance's copy nearest the camera, which is what makes the castle endless at no CPU cost. It also skips anything past the fog (150 m; the fog is thinner than before so the castle stretches further into the dark) and thin pieces too small to matter.
 * **Look.** Procedural plank grain, tatami weave, and pen-and-ink box edges taken from the blueprint drawing. The shoji have lattice paper lit from inside (HDR, so it blooms), occasional silhouettes behind the paper, and far shoji average into a soft glow. Lighting comes from the 8 nearest lanterns, a warm ambient field, and a faint crimson haze rising from the abyss below.
 * **Bloom.** `UnrealBloomPass` runs on a half-float target with a threshold of 1.0, so only paper and lanterns glow. Strength 0.595 and shoji brightness 0.7 are both 30% below the first version (`RENDER.bloom`, `CASTLE.shojiBrightness`). ACES tone mapping, then a grade pass with vignette, grain, chromatic aberration, a red strum flash and a radial speed blur in freefall.
+
+## Doma's Lotus Pond (a rare boss room)
+
+Three decks per castle become Doma's hall. One is right next to the deck you land on, in the neighbouring cell. It's level with the landing deck and joined to it by its own flat bridge, so its glowing icy walls are the first thing you see across the void, about 50 m away. If no deck sits beside the landing deck, one is built for the hall. In 200 random castles, 199 had it there; the rare exception falls back to a hall a couple of cells away on the same floor. The other two halls are on other floors. Every Biwa drop builds a new castle, so the halls move every time. `POND` in config holds the numbers.
+
+* **The hall.** It's a 40 × 40 m room, 16 m tall. It fills a whole generation cell, and the cell above is cleared for it. The room is built from ordinary castle parts, so it lives in the same instanced draw calls, collides exactly, morphs, and gets cut by the trapdoor like any other floor:
+  * a shallow bed under the whole room;
+  * an engawa walkway ring at door level, which every door opens onto;
+  * a wide bridge across the centre, one step up, with low rails you can step over into the water;
+  * a raised dais in the middle, another step up;
+  * frosted-paper shoji walls two storeys high, lit icy blue from behind (silhouettes included), with pillars, nageshi beams and a coffered lacquer ceiling.
+* **The water (`LotusPond.js`).** One custom shader does all of it, with no second scene render:
+  * **Reflections.** The hall is a known box, so the shader traces the mirrored view ray straight to its walls or ceiling and draws the paper pattern there. The reflection is soft, as on rough water, and bends with the ripples.
+  * **Below the surface.** A shallow pebble bed, the lotuses' light pooling on it (a glow map baked per hall) and drifting caustics.
+  * **Fresnel.** A Fresnel term keeps it a dark mirror.
+* **Wading.** The water is 28 cm deep and his shins disappear into it. In the water:
+  * He moves at 82% speed.
+  * Every stride drops a ripple ring at the foot that's down (12 live rings, drawn as normal displacement in the water shader).
+  * A landing makes a big ring and a splash.
+  * His steps slosh instead of knocking on wood.
+  * Kanao ripples as she follows.
+* **Ice lotuses.** 70 per hall in clusters, on frosted ice pads. Each is three rings of cupped crystal petals around a glowing HDR core that the bloom picks up.
+  * **Close up on desktop:** the petals use `MeshPhysicalMaterial` with `transmission: 1.0`, `ior: 1.5` and a blue tint (attenuation), plus a small baked icy environment map to sparkle with.
+  * **Further than about 22 m, and always on touch devices:** they switch to a glassy look without transmission. Transmission costs a second render of the scene, and switching avoids paying for it.
+  * Their cold light also feeds the castle shader's 8-lamp lighting, so the bridge and walls are lit blue.
+* **The palette shift.** Stepping inside the hall's bounding box lerps everything from warm to cold over exactly 3 s, and leaving lerps it back:
+  * the hemisphere ambient and the shader's ambient field;
+  * the lantern point lights (the castle's own lanterns cool too);
+  * the hero fill and the characters' rim light;
+  * the abyss haze;
+  * the wood's colour (it greys and cools);
+  * the drifting embers, which turn to frost motes;
+  * the `UnrealBloomPass` mip tints, from white-warm to cyan;
+  * the final colour grade.
+* **A safe zone.** While Tanjiro is inside a hall, the Biwa's hidden timer pauses (and the touch Biwa button greys out). It resumes the moment he steps out, as the lights start lerping back to orange. `main.js` sets `biwa.safe` from the hall's trigger volume every frame.
+* **Renge Bodhisattva.** A seated ice Buddha, about 11 m tall, sits on a lotus throne in the water at the back of the hall (the half whose wall has fewer doors), facing the bridge.
+  * **The figure.** There's no GLTF, so `IceBuddha.js` builds it from smooth primitives:
+    * a lathed torso, crossed legs and upturned soles;
+    * capsule arms with the hands in the lap;
+    * a head with snail-shell curls, the ushnisha, long ear lobes, closed eyes and the urna;
+    * a halo, and a slowly turning ring of ice flames behind it.
+  * **The ice.** `MeshPhysicalMaterial` with `transmission: 1.0`, `roughness: 0.1`, `ior: 1.31` and `thickness: 4`, with deep blue colour and attenuation. Light passing through it refracts the glowing hall and turns glacier-blue. A procedural frost normal map breaks up the refraction and the highlights.
+  * **The fallback.** On touch devices, or if the frame rate stays low even at the lowest resolution, it switches to a `MeshStandardMaterial` (metalness 0.9, roughness 0.1) that reads as polished ice.
+  * **Collision.** It has collision boxes, so you can't wade through it.
+* **The Icicle Breath (every 15 s).**
+  * **Wind-up:** for 1.7 s the Buddha leans forward and lifts its chin, its arms swing out and the ice glows from within.
+  * **Breath:** it exhales a burst of 170 icicles (one instanced draw, the same ice material) from its mouth in a wide fan across the pond, at 15–32 m/s with gravity, with a frozen hiss and a camera shake if you're inside.
+  * **Landing:** they stick where they land: in the bridge, the dais, the engawa, the shoji walls or the water, with ripples, glassy pings and splashes. The hall's surfaces are known, so collision is exact and analytic.
+  * **Shatter:** they shatter (a swell, then scale to 0) 3 s after launch.
+  * **No damage:** it's a spectacle.
+  * **Cost:** the loop runs only while Tanjiro is within about 45 m of the hall. Elsewhere the timer is frozen and no icicles exist. The update costs about 0.03 ms a frame.
+* **The mist.** A low-lying frost creeps across the water and the bridge: 150 big soft puffs (75 on touch devices) in one instanced draw. All their drifting, turning and breathing in size and opacity happens in the vertex shader. They're pale cyan and glow where the lotuses are.
+  * It doesn't use `scene.fog`, which would grey the castle's black void everywhere.
+  * `depthWrite` is off, and the fade is soft without a depth texture: since every surface of the hall is known, each fragment fades by its height above whatever is under it (water, bridge, dais, engawa), by its distance to the walls, and near Tanjiro's and Kanao's legs. There's no hard line where a puff meets anything.
+* **In-room haze.** The castle shader's fog gains a pale-blue term whose density lerps from 0 to `POND.iceFog` with the 3 s palette shift, and back to 0 when you leave, so the rest of the castle stays black.
+* **Phones.** Phones never pay for transmission. The water shader drops one noise layer and the caustics. Half the mist. The Buddha uses the metallic fallback.
+* **Debug.** With `?debug`, press **P** to jump to the nearest hall, or call `__castle.toPond()`.
 
 ## Characters
 
@@ -154,6 +213,7 @@ How the expensive parts stay cheap:
 * **No hitch at the strum.** The opening castle is generated, its collision hash built, uploaded, assembled and its shaders compiled behind the loading screen. While it's hidden, its instances are culled in the shader rather than with `mesh.visible`, so the 5 MB instance upload has already happened before the drop.
 * **Adaptive resolution.** The pixel ratio drops if the frame rate sags. Hidden or throttled tabs are ignored, so a background tab doesn't wrongly downgrade it.
 * **No MSAA at high pixel ratios.**
+* **The Lotus Pond.** Inside a hall it holds 60 fps at 1.5× both with transmissive lotuses and without. Its shaders (the water, both lotus looks) are compiled behind the loading screen, and halls beyond the fog aren't drawn.
 
 ## Notes
 
